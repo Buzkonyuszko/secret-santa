@@ -63,13 +63,22 @@ function generateLinks() {
     if (names.length < 2) return alert("You need at least two participants.");
 
     let shuffled;
-    // 🔥 Ensure no one gets themselves
+    let attempts = 0;
+
+    // 🔥 Create a valid derangement (no self & no duplicates)
     do {
         shuffled = shuffle([...names]);
-    } while (shuffled.some((name, i) => name === names[i]));
+        attempts++;
+        if (attempts > 1000) {
+            alert("Couldn't create a valid assignment. Please try again!");
+            return;
+        }
+    } while (
+        shuffled.some((name, i) => name === names[i]) ||     // ❌ no self
+        new Set(shuffled).size !== shuffled.length           // ❌ no duplicates
+    );
 
     const assignments = {};
-
     names.forEach((name, i) => {
         const recipient = shuffled[i];
         assignments[name] = encrypt(recipient, name);
