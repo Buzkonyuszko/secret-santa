@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Secret Santa (Secure)</title>
+<style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; }
+    input, button { padding: 10px; margin: 5px 0; width: 100%; }
+    .hidden { display: none; }
+</style>
+</head>
+<body>
+<h2>Secret Santa Organizer (Secure)</h2>
+
+<div id="setup">
+    <p>Enter participant names (one per line):</p>
+    <textarea id="nameList" rows="8" style="width:100%;"></textarea>
+    <button onclick="generateLinks()">Generate Secret Links</button>
+</div>
+
+<div id="links" class="hidden">
+    <h3>Send these links to each participant:</h3>
+    <p>(They only reveal the result *when opened* — you cannot see their assignment.)</p>
+    <div id="linkContainer"></div>
+</div>
+
+<div id="result" class="hidden">
+    <h3>Your Secret Santa Draw:</h3>
+    <p id="drawResult"></p>
+</div>
+
+<script>
+// Encryption helpers
+async function encryptMessage(message, key) {
+    const enc = new TextEncoder().encode(message);
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: key.iv }, key.key, enc);
+    return btoa(JSON.stringify({ iv: Array.from(key.iv), data: Array.from(new Uint8Array(ciphertext)) }));
+}
+
+async function decryptMessage(encoded, key) {
+    const { iv, data } = JSON.parse(atob(encoded));
+    const ciphertext = new Uint8Array(data);
+    const ivArr = new Uint8Array(iv);
+    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivArr }, key, ciphertext);
+    return new TextDecoder().decode(decrypted);
+}
+
+async function generateKey() {
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const exported = await crypto.subtle.exportKey("raw", key);
+    const token = btoa(String.fromCharCode(...new Uint8Array(exported)));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    return { key, iv, token };
+}
+
+// Shuffle
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+// Avoid self-assignment
+function createPairs(names) {
+    let receivers = shuffle([...names]);
+    let attempts = 100;
+    while (attempts--) {
+        let ok = true;
+        for (let i = 0; i < names.length; i++) {
+            if (names[i] === receivers[i]) {
+                receivers = shuffle([...names]);
+                ok = false;
+                break;
+            }
+        }
+        if (ok) return receivers;
+    }
+    return null;
+}
+
+async function generateLinks() {
+    const names = document.getElementById("nameList").value
+        .split("\n").map(n => n.trim()).filter(n => n);
+
+    if (names.length < 2) {
+        alert("Enter at least 2 names.");
+        return;
+    }
+
+    const receivers = createPairs(names);
+    if (!receivers) {
+        alert("Could not create valid assignments.");
+        return;
+    }
+
+    const container = document.getElementById("linkContainer");
+    container.innerHTML = "";
+
+    let encryptedMap = {};
+
+    for (let i = 0; i < names.length; i++) {
+        const giver = names[i];
+        const receiver = receivers[i];
+
+        const keyObj = await generateKey();
+        const encrypted = await encryptMessage(receiver, keyObj);
+
+        // Store the encrypted receivers in a map
+        encryptedMap[giver] = { encrypted, key: keyObj.token };
+        
+        const url =
+            `${window.location.href.split("#")[0]}#${encodeURIComponent(giver)}:${encodeURIComponent(keyObj.token)}`;
+
+        container.innerHTML += `<p><b>${giver}:</b> <a href="${url}" target="_blank">${url}</a></p>`;
+    }
+
+    // Save encrypted data inside the page so the script can read it
+    window.encryptedData = encryptedMap;
+
+    document.getElementById("links").classList.remove("hidden");
+}
+
+// Reading results
+(async () => {
+    if (!window.location.hash) return;
+
+    const [giver, token] = window.location.hash.substring(1).split(":").map(decodeURIComponent);
+    document.getElementById("setup").classList.add("hidden");
+    document.getElementById("links").classList.add("hidden");
+
+    const encryptedEntry = window.opener?.encryptedData?.[giver];
+
+    if (!encryptedEntry) {
+        document.getElementById("result").classList.remove("hidden");
+        document.getElementById("drawResult").textContent = "Error: Data not available.";
+        return;
+    }
+
+    const rawKey = Uint8Array.from(atob(token), c => c.charCodeAt(0));
+    const cryptoKey = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["decrypt"]);
+
+    const receiver = await decryptMessage(encryptedEntry.encrypted, cryptoKey);
+    
+    document.getElementById("result").classList.remove("hidden");
+    document.getElementById("drawResult").textContent = `${giver}, you are buying a gift for: ${receiver}`;
+})();
+</script>
+</body>
+</html>
