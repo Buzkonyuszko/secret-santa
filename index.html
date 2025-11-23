@@ -62,9 +62,14 @@ function generateLinks() {
     const names = namesText.split("\n").map(n => n.trim()).filter(Boolean);
     if (names.length < 2) return alert("You need at least two participants.");
 
-    const shuffled = shuffle([...names]);
+    let shuffled;
+    // 🔥 Ensure no one gets themselves
+    do {
+        shuffled = shuffle([...names]);
+    } while (shuffled.some((name, i) => name === names[i]));
+
     const assignments = {};
-    
+
     names.forEach((name, i) => {
         const recipient = shuffled[i];
         assignments[name] = encrypt(recipient, name);
@@ -83,7 +88,7 @@ function generateLinks() {
     linksDiv.innerHTML += `<a href="${url}" download="assignments.json">Download assignments.json</a>`;
 }
 
-// On page load, check for hash to reveal assignment
+// On page load — check for hash to reveal assignment
 window.addEventListener("load", () => {
     const hash = decodeURIComponent(window.location.hash.substring(1));
     if (!hash) return;
